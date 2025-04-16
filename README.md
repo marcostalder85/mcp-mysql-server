@@ -22,26 +22,52 @@ npx @malove86/mcp-mysql-server
         "MYSQL_HOST": "your_host",
         "MYSQL_USER": "your_user",
         "MYSQL_PASSWORD": "your_password",
-        "MYSQL_DATABASE": "your_database"
+        "MYSQL_DATABASE": "your_database",
+        "MYSQL_PORT": "3306"
       }
     }
   }
 }
 ```
 
+> 注意：MYSQL_PORT是可选的，默认值为3306。
+
 ## 可用工具
 
 ### 1. connect_db
 使用提供的凭据建立与MySQL数据库的连接。
 
+```json
+{
+  "host": "localhost",
+  "user": "root",
+  "password": "your_password",
+  "database": "your_database",
+  "port": 3306  // 可选，默认为3306
+}
+```
+
 ### 2. query
 执行SELECT查询，支持可选的预处理语句参数。
+
+```json
+{
+  "sql": "SELECT * FROM users WHERE id = ?",
+  "params": [1]  // 可选参数
+}
+```
 
 ### 3. list_tables
 列出已连接数据库中的所有表。
 
 ### 4. describe_table
 获取特定表的结构。
+
+```json
+{
+  "table": "users"
+}
+```
 
 ## 功能特点
 
