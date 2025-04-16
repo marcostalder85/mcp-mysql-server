@@ -62,6 +62,7 @@ class MySQLServer {
   private connection: mysql.Connection | null = null;
   private pool: Pool | null = null;
   private config: DatabaseConfig | null = null;
+  private autoConnected: boolean = false;
 
   constructor() {
     this.server = new Server(
@@ -88,6 +89,9 @@ class MySQLServer {
         database: process.env.MYSQL_DATABASE as string,
         port: Number(process.env.MYSQL_PORT ?? 3306),
       };
+
+      // 打印连接信息
+      console.error(`[Init] Found database configuration in environment variables: ${this.config.host}:${this.config.port}/${this.config.database}`);
     }
 
     this.setupToolHandlers();
@@ -111,10 +115,11 @@ class MySQLServer {
   }
 
   private async ensureConnection() {
+    // 如果没有配置，抛出错误
     if (!this.config) {
       throw new McpError(
         ErrorCode.InvalidRequest,
-        'Database configuration not set. Use connect_db tool first.'
+        'Database configuration not set. Use connect_db tool first or set environment variables.'
       );
     }
 
@@ -135,6 +140,7 @@ class MySQLServer {
         conn.release();
 
         console.error(`Successfully connected to MySQL database: ${this.config.host}:${this.config.port || 3306}/${this.config.database}`);
+        this.autoConnected = true;
       } catch (error) {
         this.pool = null; // 重置连接池对象以便下次重试
         const errorMsg = getErrorMessage(error);
@@ -152,7 +158,7 @@ class MySQLServer {
       tools: [
         {
           name: 'connect_db',
-          description: 'Connect to MySQL database',
+          description: 'Connect to MySQL database (optional if environment variables are set)',
           inputSchema: {
             type: 'object',
             properties: {
@@ -206,8 +212,13 @@ class MySQLServer {
           description: 'List all tables in the database',
           inputSchema: {
             type: 'object',
-            properties: {},
-            required: [],
+            properties: {
+              random_string: {
+                type: 'string',
+                description: 'Dummy parameter for no-parameter tools',
+              }
+            },
+            required: ['random_string'],
           },
         },
         {
@@ -228,6 +239,17 @@ class MySQLServer {
     }));
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      // 如果有环境变量配置并且不是connect_db命令，先确保连接存在
+      if (this.config && !this.autoConnected && request.params.name !== 'connect_db') {
+        try {
+          await this.ensureConnection();
+          this.autoConnected = true;
+        } catch (error) {
+          console.error(`Auto-connection failed: ${getErrorMessage(error)}`);
+          // 不抛出错误，让后续操作根据实际情况处理
+        }
+      }
+
       switch (request.params.name) {
         case 'connect_db':
           return await this.handleConnectDb(request.params.arguments);
@@ -277,6 +299,7 @@ class MySQLServer {
 
     try {
       await this.ensureConnection();
+      this.autoConnected = true;
       return {
         content: [
           {
@@ -307,18 +330,7 @@ class MySQLServer {
       );
     }
 
-    if (!args.sql) {
-      throw new McpError(ErrorCode.InvalidParams, 'SQL query is required');
-    }
-
     const sql = args.sql.trim();
-
-    if (!sql.toUpperCase().startsWith('SELECT')) {
-      throw new McpError(
-        ErrorCode.InvalidParams,
-        'Only SELECT queries are allowed with query tool'
-      );
-    }
 
     // 验证SQL安全性
     if (!validateSqlQuery(sql)) {
@@ -398,6 +410,18 @@ class MySQLServer {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
     console.error('MySQL MCP server running on stdio');
+
+    // 如果配置了环境变量，尝试初始连接
+    if (this.config && !this.autoConnected) {
+      try {
+        await this.ensureConnection();
+        console.error('[Init] Auto-connected to database with environment variables');
+        this.autoConnected = true;
+      } catch (error) {
+        console.error(`[Init] Auto-connection failed: ${getErrorMessage(error)}`);
+        // 不抛出错误，让后续操作根据实际情况处理
+      }
+    }
   }
 }
 
