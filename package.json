@@ -1,5 +1,5 @@
 {
-  "name": "@f4ww4z/mcp-mysql-server",
+  "name": "@malove86/mcp-mysql-server",
   "version": "0.1.0",
   "description": "A Model Context Protocol server for MySQL database operations",
   "type": "module",
@@ -23,7 +23,7 @@
     "claude",
     "anthropic"
   ],
-  "author": "f4ww4z",
+  "author": "malove86",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "0.6.0",
