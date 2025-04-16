@@ -10,7 +10,11 @@ npx @malove86/mcp-mysql-server
 
 ## 配置
 
-服务器需要在MCP设置配置文件中设置以下环境变量：
+服务器支持两种部署模式：
+
+### 1. 本地运行模式
+
+在MCP设置配置文件中使用命令行运行：
 
 ```json
 {
@@ -30,12 +34,48 @@ npx @malove86/mcp-mysql-server
 }
 ```
 
+### 2. 远程URL模式 (v0.2.2+)
+
+指向远程运行的MCP服务器：
+
+```json
+{
+  "mcpServers": {
+    "mcp-mysql-server": {
+      "url": "http://your-server-address:port/mcp-mysql-server"
+    }
+  }
+}
+```
+
+在远程服务器上，您需要设置环境变量后启动MCP服务器：
+
+```bash
+# 设置环境变量
+export MYSQL_HOST=your_host
+export MYSQL_USER=your_user
+export MYSQL_PASSWORD=your_password
+export MYSQL_DATABASE=your_database
+export MYSQL_PORT=3306  # 可选，默认为3306
+
+# 启动服务器
+npx @malove86/mcp-mysql-server
+```
+
 > 注意：MYSQL_PORT是可选的，默认值为3306。
+
+## 新特性 (v0.2.2+)
+
+- **自动数据库连接**：在服务器启动时，如果设置了环境变量，会自动尝试连接数据库
+- **无需客户端参数**：当使用URL模式时，客户端不需要提供数据库连接信息
+- **无感知数据库操作**：可以直接使用`list_tables`、`query`等工具，无需先调用`connect_db`
+- **更安全**：敏感的数据库凭据只在服务器端存在，不会暴露在客户端对话中
+- **优雅的容错**：即使初始连接失败，后续操作会自动重试连接
 
 ## 可用工具
 
 ### 1. connect_db
-使用提供的凭据建立与MySQL数据库的连接。
+使用提供的凭据建立与MySQL数据库的连接。如果已通过环境变量设置了连接，此工具是可选的。
 
 ```json
 {
@@ -60,6 +100,12 @@ npx @malove86/mcp-mysql-server
 ### 3. list_tables
 列出已连接数据库中的所有表。
 
+```json
+{
+  "random_string": "dummy"  // 需要任意字符串参数
+}
+```
+
 ### 4. describe_table
 获取特定表的结构。
 
@@ -76,6 +122,8 @@ npx @malove86/mcp-mysql-server
 - 全面的错误处理和验证
 - TypeScript支持
 - 自动连接管理
+- 服务器环境变量配置
+- 支持URL远程连接模式
 
 ## 安全性
 
@@ -83,6 +131,7 @@ npx @malove86/mcp-mysql-server
 - 通过环境变量支持安全密码处理
 - 执行前验证查询
 - 完成后自动关闭连接
+- URL模式下敏感凭据不暴露在客户端
 
 ## 贡献
 
