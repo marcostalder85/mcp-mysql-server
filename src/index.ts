@@ -59,10 +59,12 @@ function validateSqlQuery(sql: string): boolean {
 
 class MySQLServer {
   private server: Server;
-  private connection: mysql.Connection | null = null;
-  private pool: Pool | null = null;
   private config: DatabaseConfig | null = null;
-  private autoConnected: boolean = false;
+  private pool: Pool | null = null;
+  private isConnected: boolean = false;
+  private connectionPromise: Promise<void> | null = null;
+  private activeConnections: number = 0;
+  private maxConnections: number = 50; // 最大同时处理的连接数
 
   constructor() {
     this.server = new Server(
@@ -105,16 +107,25 @@ class MySQLServer {
   }
 
   private async cleanup() {
-    if (this.connection) {
-      await this.connection.end();
-    }
     if (this.pool) {
-      await this.pool.end();
+      try {
+        console.error(`[Cleanup] Closing connection pool, active connections: ${this.activeConnections}`);
+        await this.pool.end();
+        console.error('[Cleanup] Connection pool closed successfully');
+      } catch (error) {
+        console.error(`[Cleanup] Error closing pool: ${getErrorMessage(error)}`);
+      }
+      this.pool = null;
     }
     await this.server.close();
   }
 
   private async ensureConnection() {
+    // 如果已经有一个正在进行的连接操作，直接返回那个Promise
+    if (this.connectionPromise) {
+      return this.connectionPromise;
+    }
+
     // 如果没有配置，抛出错误
     if (!this.config) {
       throw new McpError(
@@ -125,32 +136,47 @@ class MySQLServer {
 
     // 创建连接池
     if (!this.pool) {
-      try {
-        // 创建连接池而不是单一连接，提高性能和稳定性
-        this.pool = mysql.createPool({
-          ...this.config,
-          waitForConnections: true,
-          connectionLimit: 10,
-          queueLimit: 0
-        });
+      const connectionPromise = (async () => {
+        try {
+          // 创建连接池而不是单一连接，提高性能和稳定性
+          this.pool = mysql.createPool({
+            ...this.config,
+            waitForConnections: true,
+            connectionLimit: this.maxConnections,  // 增加连接池大小以支持更多同时连接
+            queueLimit: 0
+          });
 
-        // 测试连接池是否正常工作
-        const conn = await this.pool.getConnection();
-        await conn.ping();
-        conn.release();
+          // 测试连接池是否正常工作
+          const conn = await this.pool.getConnection();
+          await conn.ping();
+          conn.release();
 
-        console.error(`Successfully connected to MySQL database: ${this.config.host}:${this.config.port || 3306}/${this.config.database}`);
-        this.autoConnected = true;
-      } catch (error) {
-        this.pool = null; // 重置连接池对象以便下次重试
-        const errorMsg = getErrorMessage(error);
-        console.error(`Database connection failed: ${errorMsg}`);
-        throw new McpError(
-          ErrorCode.InternalError,
-          `Failed to connect to database: ${errorMsg}`
-        );
-      }
+          // 这里一定有config，因为前面已经检查过
+          const config = this.config!;
+          console.error(`Successfully connected to MySQL database: ${config.host}:${config.port || 3306}/${config.database}`);
+          this.isConnected = true;
+
+          // 连接成功后清空connectionPromise，允许将来的连接检查创建新的Promise
+          this.connectionPromise = null;
+        } catch (error) {
+          this.pool = null; // 重置连接池对象以便下次重试
+          this.isConnected = false;
+          this.connectionPromise = null; // 重置连接Promise
+
+          const errorMsg = getErrorMessage(error);
+          console.error(`Database connection failed: ${errorMsg}`);
+          throw new McpError(
+            ErrorCode.InternalError,
+            `Failed to connect to database: ${errorMsg}`
+          );
+        }
+      })();
+
+      this.connectionPromise = connectionPromise;
+      return connectionPromise;
     }
+
+    return Promise.resolve();
   }
 
   private setupToolHandlers() {
@@ -218,7 +244,7 @@ class MySQLServer {
                 description: 'Dummy parameter for no-parameter tools',
               }
             },
-            required: ['random_string'],
+            required: [], // 修改为可选参数
           },
         },
         {
@@ -239,36 +265,57 @@ class MySQLServer {
     }));
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      // 如果有环境变量配置并且不是connect_db命令，先确保连接存在
-      if (this.config && !this.autoConnected && request.params.name !== 'connect_db') {
-        try {
-          await this.ensureConnection();
-          this.autoConnected = true;
-        } catch (error) {
-          console.error(`Auto-connection failed: ${getErrorMessage(error)}`);
-          // 不抛出错误，让后续操作根据实际情况处理
-        }
-      }
+      // 获取请求ID用于日志
+      const requestId = `req-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      console.error(`[${requestId}] Received tool call: ${request.params.name}`);
 
-      switch (request.params.name) {
-        case 'connect_db':
-          return await this.handleConnectDb(request.params.arguments);
-        case 'query':
-          return await this.handleQuery(request.params.arguments);
-        case 'list_tables':
-          return await this.handleListTables();
-        case 'describe_table':
-          return await this.handleDescribeTable(request.params.arguments);
-        default:
-          throw new McpError(
-            ErrorCode.MethodNotFound,
-            `Unknown tool: ${request.params.name}`
-          );
+      // 增加活跃连接计数
+      this.activeConnections++;
+      console.error(`[${requestId}] Active connections: ${this.activeConnections}`);
+
+      try {
+        // 如果有环境变量配置并且不是connect_db命令，先确保连接存在
+        if (this.config && !this.isConnected && request.params.name !== 'connect_db') {
+          try {
+            console.error(`[${requestId}] Auto-connecting to database`);
+            await this.ensureConnection();
+          } catch (error) {
+            console.error(`[${requestId}] Auto-connection failed: ${getErrorMessage(error)}`);
+            // 不抛出错误，让后续操作根据实际情况处理
+          }
+        }
+
+        let result;
+        switch (request.params.name) {
+          case 'connect_db':
+            result = await this.handleConnectDb(requestId, request.params.arguments);
+            break;
+          case 'query':
+            result = await this.handleQuery(requestId, request.params.arguments);
+            break;
+          case 'list_tables':
+            result = await this.handleListTables(requestId);
+            break;
+          case 'describe_table':
+            result = await this.handleDescribeTable(requestId, request.params.arguments);
+            break;
+          default:
+            throw new McpError(
+              ErrorCode.MethodNotFound,
+              `Unknown tool: ${request.params.name}`
+            );
+        }
+
+        return result;
+      } finally {
+        // 减少活跃连接计数
+        this.activeConnections--;
+        console.error(`[${requestId}] Request completed, active connections: ${this.activeConnections}`);
       }
     });
   }
 
-  private async handleConnectDb(args: any) {
+  private async handleConnectDb(requestId: string, args: any) {
     // 验证参数
     if (!args.host || !args.user || args.password === undefined || args.password === null || !args.database) {
       throw new McpError(
@@ -277,15 +324,14 @@ class MySQLServer {
       );
     }
 
-    // 关闭现有连接
-    if (this.connection) {
-      await this.connection.end();
-      this.connection = null;
-    }
-
     // 关闭现有连接池
     if (this.pool) {
-      await this.pool.end();
+      try {
+        console.error(`[${requestId}] Closing existing connection pool`);
+        await this.pool.end();
+      } catch (error) {
+        console.error(`[${requestId}] Error closing pool: ${getErrorMessage(error)}`);
+      }
       this.pool = null;
     }
 
@@ -298,8 +344,8 @@ class MySQLServer {
     };
 
     try {
+      console.error(`[${requestId}] Connecting to database: ${this.config.host}:${this.config.port}/${this.config.database}`);
       await this.ensureConnection();
-      this.autoConnected = true;
       return {
         content: [
           {
@@ -316,7 +362,7 @@ class MySQLServer {
     }
   }
 
-  private async handleQuery(args: any) {
+  private async handleQuery(requestId: string, args: any) {
     await this.ensureConnection();
 
     if (!args.sql) {
@@ -341,7 +387,13 @@ class MySQLServer {
     }
 
     try {
+      console.error(`[${requestId}] Executing query: ${sql.substring(0, 100)}${sql.length > 100 ? '...' : ''}`);
       const [rows] = await this.pool!.query(args.sql, args.params || []);
+
+      // 计算结果集大小
+      const resultSize = JSON.stringify(rows).length;
+      console.error(`[${requestId}] Query executed successfully, result size: ${resultSize} bytes`);
+
       return {
         content: [
           {
@@ -352,7 +404,7 @@ class MySQLServer {
       };
     } catch (error) {
       const errorMsg = getErrorMessage(error);
-      console.error(`Query execution failed: ${errorMsg}`);
+      console.error(`[${requestId}] Query execution failed: ${errorMsg}`);
       throw new McpError(
         ErrorCode.InternalError,
         `Query execution failed: ${errorMsg}`
@@ -360,11 +412,14 @@ class MySQLServer {
     }
   }
 
-  private async handleListTables() {
+  private async handleListTables(requestId: string) {
     await this.ensureConnection();
 
     try {
+      console.error(`[${requestId}] Executing SHOW TABLES`);
       const [rows] = await this.pool!.query('SHOW TABLES');
+      console.error(`[${requestId}] SHOW TABLES completed, found ${Array.isArray(rows) ? rows.length : 0} tables`);
+
       return {
         content: [
           {
@@ -374,14 +429,16 @@ class MySQLServer {
         ],
       };
     } catch (error) {
+      const errorMsg = getErrorMessage(error);
+      console.error(`[${requestId}] Failed to list tables: ${errorMsg}`);
       throw new McpError(
         ErrorCode.InternalError,
-        `Failed to list tables: ${getErrorMessage(error)}`
+        `Failed to list tables: ${errorMsg}`
       );
     }
   }
 
-  private async handleDescribeTable(args: any) {
+  private async handleDescribeTable(requestId: string, args: any) {
     await this.ensureConnection();
 
     if (!args.table) {
@@ -389,7 +446,10 @@ class MySQLServer {
     }
 
     try {
+      console.error(`[${requestId}] Executing DESCRIBE ${args.table}`);
       const [rows] = await this.pool!.query('DESCRIBE ??', [args.table]);
+      console.error(`[${requestId}] DESCRIBE completed, found ${Array.isArray(rows) ? rows.length : 0} columns`);
+
       return {
         content: [
           {
@@ -399,9 +459,11 @@ class MySQLServer {
         ],
       };
     } catch (error) {
+      const errorMsg = getErrorMessage(error);
+      console.error(`[${requestId}] Failed to describe table: ${errorMsg}`);
       throw new McpError(
         ErrorCode.InternalError,
-        `Failed to describe table: ${getErrorMessage(error)}`
+        `Failed to describe table: ${errorMsg}`
       );
     }
   }
@@ -410,13 +472,14 @@ class MySQLServer {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
     console.error('MySQL MCP server running on stdio');
+    console.error(`Max concurrent connections: ${this.maxConnections}`);
 
     // 如果配置了环境变量，尝试初始连接
-    if (this.config && !this.autoConnected) {
+    if (this.config && !this.isConnected) {
       try {
+        console.error('[Init] Auto-connecting to database with environment variables');
         await this.ensureConnection();
-        console.error('[Init] Auto-connected to database with environment variables');
-        this.autoConnected = true;
+        console.error('[Init] Auto-connection succeeded');
       } catch (error) {
         console.error(`[Init] Auto-connection failed: ${getErrorMessage(error)}`);
         // 不抛出错误，让后续操作根据实际情况处理
