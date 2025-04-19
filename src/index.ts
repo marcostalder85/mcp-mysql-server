@@ -20,6 +20,7 @@ interface DatabaseConfig {
   password: string;
   database: string;
   port?: number; // Add optional port parameter
+  socketPath?: string; // Add optional socket path parameter
 }
 
 // Type guard for error objects
@@ -92,8 +93,13 @@ class MySQLServer {
         port: Number(process.env.MYSQL_PORT ?? 3306),
       };
 
+      // Add socket path if provided in environment variables
+      if (process.env.MYSQL_SOCKET) {
+        this.config.socketPath = process.env.MYSQL_SOCKET;
+      }
+
       // 打印连接信息
-      console.error(`[Init] Found database configuration in environment variables: ${this.config.host}:${this.config.port}/${this.config.database}`);
+      console.error(`[Init] Found database configuration in environment variables: ${this.config.host}:${this.config.port}/${this.config.database}${this.config.socketPath ? ` (socket: ${this.config.socketPath})` : ''}`);
     }
 
     this.setupToolHandlers();
@@ -153,7 +159,7 @@ class MySQLServer {
 
           // 这里一定有config，因为前面已经检查过
           const config = this.config!;
-          console.error(`Successfully connected to MySQL database: ${config.host}:${config.port || 3306}/${config.database}`);
+          console.error(`Successfully connected to MySQL database: ${config.host}:${config.port || 3306}/${config.database}${config.socketPath ? ` (socket: ${config.socketPath})` : ''}`);
           this.isConnected = true;
 
           // 连接成功后清空connectionPromise，允许将来的连接检查创建新的Promise
@@ -207,6 +213,10 @@ class MySQLServer {
               port: {
                 type: 'number',
                 description: 'Database port (optional)',
+              },
+              socketPath: {
+                type: 'string',
+                description: 'MySQL Unix socket path (optional, overrides host and port)',
               },
             },
             required: ['host', 'user', 'password', 'database'],
@@ -343,8 +353,12 @@ class MySQLServer {
       port: args.port || 3306, // 确保有默认端口
     };
 
+    if (args.socketPath) {
+      this.config.socketPath = args.socketPath;
+    }
+
     try {
-      console.error(`[${requestId}] Connecting to database: ${this.config.host}:${this.config.port}/${this.config.database}`);
+      console.error(`[${requestId}] Connecting to database: ${this.config.host}:${this.config.port}/${this.config.database}${this.config.socketPath ? ` (socket: ${this.config.socketPath})` : ''}`);
       await this.ensureConnection();
       return {
         content: [

@@ -27,6 +27,9 @@ startCommand:
         type: integer
         description: Port for the MySQL server (default 3306)
         default: 3306
+      mysqlSocket:
+        type: string
+        description: Socket for the MySQL server (if applicable)
   commandFunction:
     # A JS function that produces the CLI command based on the given config to start the MCP on stdio.
     |-
@@ -39,6 +42,7 @@ startCommand:
         MYSQL_PASSWORD: config.mysqlPassword,
         MYSQL_DATABASE: config.mysqlDatabase,
         MYSQL_PORT: config.mysqlPort?.toString() || '3306'
+        MYSQL_SOCKET: config.mysqlSocket?.toString() || ''
       }
     })
   exampleConfig:
@@ -47,3 +51,4 @@ startCommand:
     mysqlPassword: example_password
     mysqlDatabase: example_db
     mysqlPort: 3306
+    mysqlSocket: /var/run/mysqld/mysqld.sock

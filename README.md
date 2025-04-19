@@ -1,42 +1,43 @@
 # mcp-mysql-server
 
-一个基于Model Context Protocol的MySQL数据库操作服务器。该服务器使AI模型能够通过标准化接口与MySQL数据库进行交互。
+A MySQL database operation server based on the Model Context Protocol. This server enables AI models to interact with MySQL databases through a standardized interface.
 
-## 安装
+## Installation
 
 ```bash
-npx @malove86/mcp-mysql-server
+npx @marcostalder85/mcp-mysql-server
 ```
 
-## 配置
+## Configuration
 
-服务器支持两种部署模式：
+The server supports two deployment modes:
 
-### 1. 本地运行模式
+### 1. Local Run Mode
 
-在MCP设置配置文件中使用命令行运行：
+Run using the command line in the MCP settings configuration file:
 
 ```json
 {
   "mcpServers": {
     "mysql": {
       "command": "npx",
-      "args": ["-y", "@malove86/mcp-mysql-server"],
+      "args": ["-y", "@marcostalder85/mcp-mysql-server"],
       "env": {
         "MYSQL_HOST": "your_host",
         "MYSQL_USER": "your_user",
         "MYSQL_PASSWORD": "your_password",
         "MYSQL_DATABASE": "your_database",
         "MYSQL_PORT": "3306"
+        "MYSQL_SOCKET": "your_socket"  // Optional, for socket connections
       }
     }
   }
 }
 ```
 
-### 2. 远程URL模式 (v0.2.2+)
+### 2. Remote URL Mode (v0.2.2+)
 
-指向远程运行的MCP服务器：
+Point to a remotely running MCP server:
 
 ```json
 {
@@ -48,43 +49,47 @@ npx @malove86/mcp-mysql-server
 }
 ```
 
-在远程服务器上，您需要设置环境变量后启动MCP服务器：
+On the remote server, you need to set environment variables before starting the MCP server:
 
 ```bash
-# 设置环境变量
+# Set environment variables
 export MYSQL_HOST=your_host
 export MYSQL_USER=your_user
 export MYSQL_PASSWORD=your_password
 export MYSQL_DATABASE=your_database
-export MYSQL_PORT=3306  # 可选，默认为3306
+export MYSQL_PORT=3306  # Optional, defaults to 3306
+export MYSQL_SOCKET=your_socket  # Optional, for socket connections
 
-# 启动服务器
-npx @malove86/mcp-mysql-server
+# Start the server
+npx @marcostalder85/mcp-mysql-server
 ```
 
-> 注意：MYSQL_PORT是可选的，默认值为3306。
+> Note: MYSQL_PORT is optional and defaults to 3306.
 
-## 版本功能
+## Version Features
 
-### v0.2.4+ 新特性
-- **多用户并发支持**：服务器现在可同时处理多个用户的请求
-- **高效连接池管理**：使用改进的连接池，支持最多50个并发连接
-- **请求级别隔离**：每个请求都有唯一标识符，便于跟踪和调试
-- **详细日志记录**：记录每个请求的执行过程和资源使用情况
-- **改进的错误处理**：更精确地捕获和报告数据库错误
-- **性能优化**：连接池复用和优化的连接管理提高处理速度
+### v0.2.5+ New Features
+- **Connection via socket**: Added support for socket connections to the MySQL database.
 
-### v0.2.2+ 特性
-- **自动数据库连接**：在服务器启动时，如果设置了环境变量，会自动尝试连接数据库
-- **无需客户端参数**：当使用URL模式时，客户端不需要提供数据库连接信息
-- **无感知数据库操作**：可以直接使用`list_tables`、`query`等工具，无需先调用`connect_db`
-- **更安全**：敏感的数据库凭据只在服务器端存在，不会暴露在客户端对话中
-- **优雅的容错**：即使初始连接失败，后续操作会自动重试连接
+### v0.2.4+ New Features
+- **Multi-user concurrency support**: The server can now handle requests from multiple users simultaneously.
+- **Efficient connection pool management**: Improved connection pool supports up to 50 concurrent connections.
+- **Request-level isolation**: Each request has a unique identifier for easier tracking and debugging.
+- **Detailed logging**: Logs the execution process and resource usage of each request.
+- **Improved error handling**: More precise capture and reporting of database errors.
+- **Performance optimization**: Connection pool reuse and optimized connection management improve processing speed.
 
-## 可用工具
+### v0.2.2+ Features
+- **Automatic database connection**: Automatically attempts to connect to the database at server startup if environment variables are set.
+- **No client parameters required**: When using URL mode, the client does not need to provide database connection information.
+- **Transparent database operations**: Tools like `list_tables` and `query` can be used directly without first calling `connect_db`.
+- **More secure**: Sensitive database credentials exist only on the server side and are not exposed in client conversations.
+- **Graceful fault tolerance**: Even if the initial connection fails, subsequent operations will automatically retry the connection.
+
+## Available Tools
 
 ### 1. connect_db
-使用提供的凭据建立与MySQL数据库的连接。如果已通过环境变量设置了连接，此工具是可选的。
+Establish a connection to the MySQL database using the provided credentials. This tool is optional if the connection is already set via environment variables.
 
 ```json
 {
@@ -92,29 +97,30 @@ npx @malove86/mcp-mysql-server
   "user": "root",
   "password": "your_password",
   "database": "your_database",
-  "port": 3306  // 可选，默认为3306
+  "port": 3306  // Optional, defaults to 3306
+  "socket": "your_socket"  // Optional, for socket connections
 }
 ```
 
 ### 2. query
-执行SELECT查询，支持可选的预处理语句参数。
+Execute a SELECT query, supporting optional prepared statement parameters.
 
 ```json
 {
   "sql": "SELECT * FROM users WHERE id = ?",
-  "params": [1]  // 可选参数
+  "params": [1]  // Optional parameters
 }
 ```
 
 ### 3. list_tables
-列出已连接数据库中的所有表。
+List all tables in the connected database.
 
 ```json
-{}  // 从v0.2.4开始不再需要任何参数
+{}  // No parameters required starting from v0.2.4
 ```
 
 ### 4. describe_table
-获取特定表的结构。
+Get the structure of a specific table.
 
 ```json
 {
@@ -122,37 +128,37 @@ npx @malove86/mcp-mysql-server
 }
 ```
 
-## 功能特点
+## Features
 
-- 安全的连接处理，自动清理
-- 支持预处理语句参数
-- 全面的错误处理和验证
-- TypeScript支持
-- 自动连接管理
-- 服务器环境变量配置
-- 支持URL远程连接模式
-- 多用户并发支持
-- 高性能连接池
+- Secure connection handling with automatic cleanup
+- Support for prepared statement parameters
+- Comprehensive error handling and validation
+- TypeScript support
+- Automatic connection management
+- Server environment variable configuration
+- Support for URL remote connection mode
+- Multi-user concurrency support
+- High-performance connection pool
 
-## 性能
+## Performance
 
-- 支持最多50个并发连接（可配置）
-- 连接池自动管理，提高资源利用率
-- 详细的请求跟踪和性能监控
+- Supports up to 50 concurrent connections (configurable)
+- Automatic connection pool management for better resource utilization
+- Detailed request tracking and performance monitoring
 
-## 安全性
+## Security
 
-- 使用预处理语句防止SQL注入
-- 通过环境变量支持安全密码处理
-- 执行前验证查询
-- 完成后自动关闭连接
-- URL模式下敏感凭据不暴露在客户端
-- 连接隔离，防止用户间数据泄露
+- Prevents SQL injection using prepared statements
+- Secure password handling via environment variables
+- Validates queries before execution
+- Automatically closes connections after completion
+- Sensitive credentials are not exposed in client conversations in URL mode
+- Connection isolation to prevent data leakage between users
 
-## 贡献
+## Contribution
 
-欢迎贡献！请随时提交Pull Request到 https://github.com/Malove86/mcp-mysql-server.git
+Contributions are welcome! Feel free to submit a Pull Request to https://github.com/marcostalder85/mcp-mysql-server.git
 
-## 许可证
+## License
 
-MIT 
+MIT
